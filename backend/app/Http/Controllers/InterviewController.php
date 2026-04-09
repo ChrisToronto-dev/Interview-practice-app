@@ -7,6 +7,7 @@ use Illuminate\Support\Facades\Http;
 use App\Models\InterviewContext;
 use App\Models\InterviewSession;
 use App\Models\InterviewSessionLog;
+use Smalot\PdfParser\Parser;
 
 class InterviewController extends Controller
 {
@@ -20,6 +21,7 @@ class InterviewController extends Controller
         $request->validate([
             'resume' => 'nullable|string',
             'qna' => 'nullable|string',
+            'job_posting' => 'nullable|string',
         ]);
 
         if ($request->has('resume')) {
@@ -28,8 +30,31 @@ class InterviewController extends Controller
         if ($request->has('qna')) {
             InterviewContext::updateOrCreate(['type' => 'qna'], ['content' => $request->qna]);
         }
+        if ($request->has('job_posting')) {
+            InterviewContext::updateOrCreate(['type' => 'job_posting'], ['content' => $request->job_posting]);
+        }
 
         return response()->json(['success' => true]);
+    }
+
+    public function extractPdf(Request $request)
+    {
+        $request->validate([
+            'pdf' => 'required|file|mimes:pdf|max:10240', // Max 10MB
+        ]);
+
+        try {
+            $parser = new Parser();
+            $pdf = $parser->parseFile($request->file('pdf')->path());
+            $text = $pdf->getText();
+
+            // 텍스트에서 불필요한 연속 공백이나 줄바꿈 조금 정리
+            $text = preg_replace('/\n\s*\n/', "\n\n", $text);
+
+            return response()->json(['text' => trim($text)]);
+        } catch (\Exception $e) {
+            return response()->json(['error' => 'Failed to parse PDF: ' . $e->getMessage()], 500);
+        }
     }
 
     public function startSession(Request $request)
@@ -89,13 +114,14 @@ class InterviewController extends Controller
         
         $resume = InterviewContext::where('type', 'resume')->first()?->content ?? '';
         $qna = InterviewContext::where('type', 'qna')->first()?->content ?? '';
+        $jobPosting = InterviewContext::where('type', 'job_posting')->first()?->content ?? '';
 
         $systemInstruction = "You are a professional technical interviewer for a software engineer role. "
-            . "The applicant has provided their resume and a Q&A base. "
-            . "Ask them interview questions sequentially based on their context. "
+            . "The applicant has provided their resume, a Q&A base, and a job posting for the position they are applying for. "
+            . "Ask them interview questions sequentially based on their context, specifically matching their skills to the job posting. "
             . "Keep your responses and questions concise and natural, imitating a real voice conversation. Do not use markdown if possible. "
             . "Speak in Korean. "
-            . "Resume:\n" . $resume . "\n\nQ&A Base:\n" . $qna;
+            . "Job Posting:\n" . $jobPosting . "\n\nResume:\n" . $resume . "\n\nQ&A Base:\n" . $qna;
 
         $contents = [];
         if (count($logs) === 0) {
