@@ -25,13 +25,13 @@ class InterviewController extends Controller
         ]);
 
         if ($request->has('resume')) {
-            InterviewContext::updateOrCreate(['type' => 'resume'], ['content' => $request->resume]);
+            InterviewContext::updateOrCreate(['type' => 'resume'], ['content' => $request->resume ?? '']);
         }
         if ($request->has('qna')) {
-            InterviewContext::updateOrCreate(['type' => 'qna'], ['content' => $request->qna]);
+            InterviewContext::updateOrCreate(['type' => 'qna'], ['content' => $request->qna ?? '']);
         }
         if ($request->has('job_posting')) {
-            InterviewContext::updateOrCreate(['type' => 'job_posting'], ['content' => $request->job_posting]);
+            InterviewContext::updateOrCreate(['type' => 'job_posting'], ['content' => $request->job_posting ?? '']);
         }
 
         return response()->json(['success' => true]);
@@ -120,7 +120,7 @@ class InterviewController extends Controller
             . "The applicant has provided their resume, a Q&A base, and a job posting for the position they are applying for. "
             . "Ask them interview questions sequentially based on their context, specifically matching their skills to the job posting. "
             . "Keep your responses and questions concise and natural, imitating a real voice conversation. Do not use markdown if possible. "
-            . "Speak in Korean. "
+            . "Speak in English. "
             . "Job Posting:\n" . $jobPosting . "\n\nResume:\n" . $resume . "\n\nQ&A Base:\n" . $qna;
 
         $contents = [];
@@ -170,7 +170,7 @@ class InterviewController extends Controller
                 'responseModalities' => ['AUDIO'],
                 'speechConfig' => [
                     'voiceConfig' => [
-                        'prebuiltVoiceConfig' => ['voiceName' => 'Kore']
+                        'prebuiltVoiceConfig' => ['voiceName' => 'Aoede']
                     ]
                 ]
             ]
@@ -214,7 +214,7 @@ class InterviewController extends Controller
                 'speechConfig' => [
                     'voiceConfig' => [
                         'prebuiltVoiceConfig' => [
-                            'voiceName' => 'Kore' // 한국어 자연스러운 목소리
+                            'voiceName' => 'Aoede' // Natural English voice
                         ]
                     ]
                 ]
