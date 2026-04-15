@@ -16,4 +16,5 @@ Route::middleware('master.auth')->group(function () {
     Route::post('/interviews', [InterviewController::class, 'startSession']);
     Route::post('/interviews/{sessionId}/chat', [InterviewController::class, 'chat']);
     Route::post('/tts', [InterviewController::class, 'tts']);
+    Route::get('/usage', [InterviewController::class, 'getUsage']);
 });

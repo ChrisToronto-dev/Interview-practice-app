@@ -7,6 +7,7 @@ use Illuminate\Support\Facades\Http;
 use App\Models\InterviewContext;
 use App\Models\InterviewSession;
 use App\Models\InterviewSessionLog;
+use App\Models\ApiUsageLog;
 use Smalot\PdfParser\Parser;
 
 class InterviewController extends Controller
@@ -57,6 +58,40 @@ class InterviewController extends Controller
         }
     }
 
+    public function getUsage()
+    {
+        $geminiLimit  = (int) env('GEMINI_DAILY_LIMIT', 500);
+        $ttsLimit     = (int) env('GEMINI_TTS_DAILY_LIMIT', 100);
+
+        $today = now()->toDateString();
+
+        $geminiUsed = ApiUsageLog::where('type', 'gemini')
+            ->whereDate('created_at', $today)
+            ->count();
+
+        $ttsUsed = ApiUsageLog::where('type', 'tts')
+            ->whereDate('created_at', $today)
+            ->count();
+
+        // 남은 질문 수는 bottleneck인 TTS 기준으로 계산
+        $remaining = max(0, $ttsLimit - $ttsUsed);
+
+        return response()->json([
+            'gemini' => [
+                'used'      => $geminiUsed,
+                'limit'     => $geminiLimit,
+                'remaining' => max(0, $geminiLimit - $geminiUsed),
+            ],
+            'tts' => [
+                'used'      => $ttsUsed,
+                'limit'     => $ttsLimit,
+                'remaining' => max(0, $ttsLimit - $ttsUsed),
+            ],
+            'questions_remaining' => $remaining,
+            'reset_at'            => now()->endOfDay()->toIso8601String(),
+        ]);
+    }
+
     public function startSession(Request $request)
     {
         $session = InterviewSession::create([
@@ -64,7 +99,10 @@ class InterviewController extends Controller
         ]);
 
         $reply = $this->callGemini([]);
+        ApiUsageLog::create(['type' => 'gemini']);
+
         $audioBase64 = $this->callGeminiTTS($reply);
+        if ($audioBase64) ApiUsageLog::create(['type' => 'tts']);
 
         $session->logs()->create([
             'role' => 'assistant',
@@ -93,7 +131,10 @@ class InterviewController extends Controller
         ]);
 
         $reply = $this->callGemini($session->logs()->get());
+        ApiUsageLog::create(['type' => 'gemini']);
+
         $audioBase64 = $this->callGeminiTTS($reply);
+        if ($audioBase64) ApiUsageLog::create(['type' => 'tts']);
 
         // AI 면접관 질문(답변) 저장
         $session->logs()->create([
