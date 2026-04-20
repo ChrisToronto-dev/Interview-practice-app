@@ -49,7 +49,7 @@ class InterviewController extends Controller
             $pdf = $parser->parseFile($request->file('pdf')->path());
             $text = $pdf->getText();
 
-            // 텍스트에서 불필요한 연속 공백이나 줄바꿈 조금 정리
+            // Clean up unnecessary consecutive spaces or line breaks in text
             $text = preg_replace('/\n\s*\n/', "\n\n", $text);
 
             return response()->json(['text' => trim($text)]);
@@ -73,7 +73,7 @@ class InterviewController extends Controller
             ->whereDate('created_at', $today)
             ->count();
 
-        // 남은 질문 수는 bottleneck인 TTS 기준으로 계산
+        // Calculate remaining questions based on TTS bottleneck
         $remaining = max(0, $ttsLimit - $ttsUsed);
 
         return response()->json([
@@ -101,9 +101,6 @@ class InterviewController extends Controller
         $reply = $this->callGemini([]);
         ApiUsageLog::create(['type' => 'gemini']);
 
-        $audioBase64 = $this->callGeminiTTS($reply);
-        if ($audioBase64) ApiUsageLog::create(['type' => 'tts']);
-
         $session->logs()->create([
             'role' => 'assistant',
             'content' => $reply
@@ -112,7 +109,6 @@ class InterviewController extends Controller
         return response()->json([
             'session_id' => $session->id,
             'reply' => $reply,
-            'audio_base64' => $audioBase64,
         ]);
     }
 
@@ -124,7 +120,6 @@ class InterviewController extends Controller
 
         $session = InterviewSession::findOrFail($sessionId);
 
-        // 사용자 답변 저장
         $session->logs()->create([
             'role' => 'user',
             'content' => $request->message
@@ -133,10 +128,6 @@ class InterviewController extends Controller
         $reply = $this->callGemini($session->logs()->get());
         ApiUsageLog::create(['type' => 'gemini']);
 
-        $audioBase64 = $this->callGeminiTTS($reply);
-        if ($audioBase64) ApiUsageLog::create(['type' => 'tts']);
-
-        // AI 면접관 질문(답변) 저장
         $session->logs()->create([
             'role' => 'assistant',
             'content' => $reply
@@ -144,7 +135,6 @@ class InterviewController extends Controller
 
         return response()->json([
             'reply' => $reply,
-            'audio_base64' => $audioBase64,
         ]);
     }
 
@@ -160,7 +150,9 @@ class InterviewController extends Controller
         $systemInstruction = "You are a professional technical interviewer for a software engineer role. "
             . "The applicant has provided their resume, a Q&A base, and a job posting for the position they are applying for. "
             . "Ask them interview questions sequentially based on their context, specifically matching their skills to the job posting. "
-            . "Keep your responses and questions concise and natural, imitating a real voice conversation. Do not use markdown if possible. "
+            . "IMPORTANT: Keep each response to 1-2 sentences MAX. Ask only ONE question at a time. "
+            . "Be conversational and natural like a real voice interview. No markdown, no bullet points, no lists. "
+            . "If the candidate's answer is good, give a very brief acknowledgment (a few words) then ask your next question. "
             . "Speak in English. "
             . "Job Posting:\n" . $jobPosting . "\n\nResume:\n" . $resume . "\n\nQ&A Base:\n" . $qna;
 
@@ -185,10 +177,14 @@ class InterviewController extends Controller
                     ['text' => $systemInstruction]
                 ]
             ],
-            'contents' => $contents
+            'contents' => $contents,
+            'generationConfig' => [
+                'maxOutputTokens' => 150,
+                'temperature' => 0.8,
+            ]
         ];
 
-        $response = Http::post($url, $payload);
+        $response = Http::timeout(30)->post($url, $payload);
 
         if ($response->successful()) {
             $json = $response->json();
@@ -224,7 +220,7 @@ class InterviewController extends Controller
         $rawBase64 = $json['candidates'][0]['content']['parts'][0]['inlineData']['data'] ?? null;
         if (!$rawBase64) return null;
 
-        // PCM -> WAV 변환 (24kHz, 16bit, mono)
+        // PCM -> WAV conversion (24kHz, 16bit, mono)
         $pcmData   = base64_decode($rawBase64);
         $sampleRate = 24000; $numChannels = 1; $bitsPerSample = 16;
         $dataSize = strlen($pcmData);
@@ -243,64 +239,16 @@ class InterviewController extends Controller
     {
         $request->validate(['text' => 'required|string|max:2000']);
 
-        $apiKey = env('GEMINI_API_KEY');
-        $url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key={$apiKey}";
-
-        $payload = [
-            'contents' => [
-                ['parts' => [['text' => $request->text]]]
-            ],
-            'generationConfig' => [
-                'responseModalities' => ['AUDIO'],
-                'speechConfig' => [
-                    'voiceConfig' => [
-                        'prebuiltVoiceConfig' => [
-                            'voiceName' => 'Aoede' // Natural English voice
-                        ]
-                    ]
-                ]
-            ]
-        ];
-
-        $response = Http::timeout(30)->post($url, $payload);
-
-        if (!$response->successful()) {
-            return response()->json(['error' => $response->body()], 500);
-        }
-
-        $json = $response->json();
-        $audioBase64 = $json['candidates'][0]['content']['parts'][0]['inlineData']['data'] ?? null;
+        $audioBase64 = $this->callGeminiTTS($request->text);
 
         if (!$audioBase64) {
-            return response()->json(['error' => 'No audio data returned'], 500);
+            return response()->json(['error' => 'TTS generation failed'], 500);
         }
 
-        $pcmData = base64_decode($audioBase64);
+        ApiUsageLog::create(['type' => 'tts']);
 
-        // PCM -> WAV 변환 (24kHz, 16bit, mono)
-        $sampleRate = 24000;
-        $numChannels = 1;
-        $bitsPerSample = 16;
-        $dataSize = strlen($pcmData);
-        $byteRate = $sampleRate * $numChannels * ($bitsPerSample / 8);
-        $blockAlign = $numChannels * ($bitsPerSample / 8);
-
-        $wavHeader = pack('A4', 'RIFF')
-            . pack('V', 36 + $dataSize)   // ChunkSize
-            . pack('A4', 'WAVE')
-            . pack('A4', 'fmt ')
-            . pack('V', 16)               // SubChunk1Size (PCM)
-            . pack('v', 1)                // AudioFormat (1 = PCM)
-            . pack('v', $numChannels)
-            . pack('V', $sampleRate)
-            . pack('V', $byteRate)
-            . pack('v', $blockAlign)
-            . pack('v', $bitsPerSample)
-            . pack('A4', 'data')
-            . pack('V', $dataSize);
-
-        return response($wavHeader . $pcmData)
-            ->header('Content-Type', 'audio/wav')
-            ->header('Content-Length', 44 + $dataSize);
+        return response()->json([
+            'audio_base64' => $audioBase64,
+        ]);
     }
 }
