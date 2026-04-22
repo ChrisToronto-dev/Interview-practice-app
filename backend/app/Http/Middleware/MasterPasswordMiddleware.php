@@ -15,10 +15,10 @@ class MasterPasswordMiddleware
      */
     public function handle(Request $request, Closure $next): Response
     {
-        $password = env('APP_MASTER_PASSWORD');
+        $apiKey = $request->header('X-Gemini-Api-Key');
 
-        if ($request->header('X-Master-Password') !== $password) {
-            return response()->json(['message' => 'Unauthorized'], 401);
+        if (!$apiKey || !str_starts_with($apiKey, 'AIza')) {
+            return response()->json(['message' => 'Unauthorized: Invalid or missing Gemini API Key'], 401);
         }
 
         return $next($request);

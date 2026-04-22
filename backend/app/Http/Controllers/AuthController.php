@@ -8,12 +8,13 @@ class AuthController extends Controller
 {
     public function verify(Request $request)
     {
-        $password = env('APP_MASTER_PASSWORD');
+        $apiKey = $request->input('api_key');
 
-        if ($request->input('password') === $password) {
+        // Gemini API keys typically start with 'AIza'
+        if ($apiKey && str_starts_with($apiKey, 'AIza')) {
             return response()->json(['success' => true]);
         }
 
-        return response()->json(['success' => false, 'message' => 'Invalid password'], 401);
+        return response()->json(['success' => false, 'message' => 'Invalid Gemini API Key format'], 401);
     }
 }

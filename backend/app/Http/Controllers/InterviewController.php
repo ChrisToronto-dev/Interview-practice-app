@@ -140,7 +140,7 @@ class InterviewController extends Controller
 
     private function callGemini($logs)
     {
-        $apiKey = env('GEMINI_API_KEY');
+        $apiKey = request()->header('X-Gemini-Api-Key') ?? env('GEMINI_API_KEY');
         $url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={$apiKey}";
         
         $resume = InterviewContext::where('type', 'resume')->first()?->content ?? '';
@@ -196,7 +196,7 @@ class InterviewController extends Controller
 
     private function callGeminiTTS(string $text): ?string
     {
-        $apiKey = env('GEMINI_API_KEY');
+        $apiKey = request()->header('X-Gemini-Api-Key') ?? env('GEMINI_API_KEY');
         $url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key={$apiKey}";
 
         $payload = [
