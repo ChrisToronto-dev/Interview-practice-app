@@ -184,14 +184,23 @@ class InterviewController extends Controller
             ]
         ];
 
-        $response = Http::timeout(30)->post($url, $payload);
+        // Try up to 2 times for transient errors
+        $response = null;
+        for ($attempt = 1; $attempt <= 2; $attempt++) {
+            $response = Http::timeout(45)->post($url, $payload);
+            if ($response->successful()) break;
+            // Only retry on 5xx server errors (not 4xx client errors)
+            if ($response->status() < 500) break;
+            if ($attempt < 2) sleep(1); // Brief pause before retry
+        }
 
         if ($response->successful()) {
             $json = $response->json();
             return $json['candidates'][0]['content']['parts'][0]['text'] ?? "Failed to generate text.";
         }
 
-        return "API Error: " . $response->body();
+        $status = $response->status();
+        return "API Error ({$status}): Please try again.";
     }
 
     private function callGeminiTTS(string $text): ?string
@@ -213,8 +222,22 @@ class InterviewController extends Controller
             ]
         ];
 
-        $response = Http::timeout(30)->post($url, $payload);
-        if (!$response->successful()) return null;
+        // Try up to 2 times for transient errors (not for quota/auth errors)
+        $response = null;
+        for ($attempt = 1; $attempt <= 2; $attempt++) {
+            $response = Http::timeout(45)->post($url, $payload);
+            if ($response->successful()) break;
+            // Don't retry client errors (4xx) — quota exceeded, auth errors, etc.
+            if ($response->status() < 500) break;
+            if ($attempt < 2) sleep(1);
+        }
+        if (!$response->successful()) {
+            \Illuminate\Support\Facades\Log::warning('Gemini TTS failed', [
+                'status' => $response->status(),
+                'body'   => substr($response->body(), 0, 500),
+            ]);
+            return null;
+        }
 
         $json = $response->json();
         $rawBase64 = $json['candidates'][0]['content']['parts'][0]['inlineData']['data'] ?? null;
