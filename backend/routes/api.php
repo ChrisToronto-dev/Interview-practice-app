@@ -15,6 +15,7 @@ Route::middleware('master.auth')->group(function () {
     Route::post('/contexts/extract-pdf', [InterviewController::class, 'extractPdf']);
     Route::post('/interviews', [InterviewController::class, 'startSession']);
     Route::post('/interviews/{sessionId}/chat', [InterviewController::class, 'chat']);
+    Route::post('/interviews/{sessionId}/feedback', [InterviewController::class, 'feedback']);
     Route::post('/tts', [InterviewController::class, 'tts']);
     Route::get('/usage', [InterviewController::class, 'getUsage']);
 });

@@ -62,8 +62,10 @@ class InterviewController extends Controller
     {
         $geminiLimit  = (int) env('GEMINI_DAILY_LIMIT', 500);
         $ttsLimit     = (int) env('GEMINI_TTS_DAILY_LIMIT', 100);
+        $googleTtsMonthlyLimit = 1_000_000; // Google TTS Neural2 free tier: 1M chars/month
 
-        $today = now()->toDateString();
+        $today     = now()->toDateString();
+        $monthStart = now()->startOfMonth()->toDateString();
 
         $geminiUsed = ApiUsageLog::where('type', 'gemini')
             ->whereDate('created_at', $today)
@@ -72,6 +74,11 @@ class InterviewController extends Controller
         $ttsUsed = ApiUsageLog::where('type', 'tts')
             ->whereDate('created_at', $today)
             ->count();
+
+        // Google TTS: sum of characters converted this month
+        $ttsCharsThisMonth = (int) ApiUsageLog::where('type', 'tts')
+            ->whereDate('created_at', '>=', $monthStart)
+            ->sum('char_count');
 
         // Calculate remaining questions based on TTS bottleneck
         $remaining = max(0, $ttsLimit - $ttsUsed);
@@ -86,6 +93,11 @@ class InterviewController extends Controller
                 'used'      => $ttsUsed,
                 'limit'     => $ttsLimit,
                 'remaining' => max(0, $ttsLimit - $ttsUsed),
+            ],
+            'google_tts' => [
+                'chars_this_month'  => $ttsCharsThisMonth,
+                'monthly_limit'     => $googleTtsMonthlyLimit,
+                'chars_remaining'   => max(0, $googleTtsMonthlyLimit - $ttsCharsThisMonth),
             ],
             'questions_remaining' => $remaining,
             'reset_at'            => now()->endOfDay()->toIso8601String(),
@@ -138,6 +150,51 @@ class InterviewController extends Controller
         ]);
     }
 
+    public function feedback(Request $request, $sessionId)
+    {
+        $session = InterviewSession::findOrFail($sessionId);
+        $logs = $session->logs()->orderBy('id')->get();
+
+        $apiKey = request()->header('X-Gemini-Api-Key') ?? env('GEMINI_API_KEY');
+        $url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={$apiKey}";
+
+        $systemInstruction = "You are an expert interview coach. Review the following mock interview transcript between an AI interviewer and an applicant. "
+            . "Provide constructive, detailed feedback on the applicant's answers. Point out strengths and areas for improvement. "
+            . "Format your response in beautiful, readable Markdown.";
+
+        $transcript = "";
+        foreach ($logs as $log) {
+            $role = $log->role === 'assistant' ? 'Interviewer' : 'Applicant';
+            $transcript .= "{$role}: {$log->content}\n\n";
+        }
+
+        $payload = [
+            'system_instruction' => [
+                'parts' => [['text' => $systemInstruction]]
+            ],
+            'contents' => [
+                [
+                    'role' => 'user',
+                    'parts' => [['text' => "Here is the interview transcript:\n\n" . $transcript]]
+                ]
+            ],
+            'generationConfig' => [
+                'temperature' => 0.7,
+            ]
+        ];
+
+        $response = Http::timeout(60)->post($url, $payload);
+        
+        if ($response->successful()) {
+            ApiUsageLog::create(['type' => 'gemini']);
+            $json = $response->json();
+            $feedbackText = $json['candidates'][0]['content']['parts'][0]['text'] ?? "Failed to generate feedback.";
+            return response()->json(['feedback' => $feedbackText]);
+        }
+
+        return response()->json(['error' => 'Failed to fetch feedback from AI'], 500);
+    }
+
     private function callGemini($logs)
     {
         $apiKey = request()->header('X-Gemini-Api-Key') ?? env('GEMINI_API_KEY');
@@ -147,14 +204,25 @@ class InterviewController extends Controller
         $qna = InterviewContext::where('type', 'qna')->first()?->content ?? '';
         $jobPosting = InterviewContext::where('type', 'job_posting')->first()?->content ?? '';
 
-        $systemInstruction = "You are a professional technical interviewer for a software engineer role. "
-            . "The applicant has provided their resume, a Q&A base, and a job posting for the position they are applying for. "
-            . "Ask them interview questions sequentially based on their context, specifically matching their skills to the job posting. "
-            . "IMPORTANT: Keep each response to 1-2 sentences MAX. Ask only ONE question at a time. "
+        $systemInstruction = "You are a professional technical interviewer. ";
+
+        if (!empty($jobPosting)) {
+            $systemInstruction .= "The applicant has provided their resume, a Q&A base, and a job posting. "
+                . "Ask them interview questions sequentially based on their context, specifically matching their skills to the job posting. ";
+        } else {
+            $systemInstruction .= "The applicant has provided their resume and a Q&A base (expected questions). "
+                . "CRITICAL INSTRUCTION: You MUST ask interview questions sequentially and STRICTLY from the provided Q&A Base. Do not invent or ask any questions outside of the Q&A Base. ";
+        }
+
+        $systemInstruction .= "IMPORTANT: Keep each response to 1-2 sentences MAX. Ask only ONE question at a time. "
             . "Be conversational and natural like a real voice interview. No markdown, no bullet points, no lists. "
             . "If the candidate's answer is good, give a very brief acknowledgment (a few words) then ask your next question. "
-            . "Speak in English. "
-            . "Job Posting:\n" . $jobPosting . "\n\nResume:\n" . $resume . "\n\nQ&A Base:\n" . $qna;
+            . "Speak in English.\n\n";
+
+        if (!empty($jobPosting)) {
+            $systemInstruction .= "Job Posting:\n" . $jobPosting . "\n\n";
+        }
+        $systemInstruction .= "Resume:\n" . $resume . "\n\nQ&A Base:\n" . $qna;
 
         $contents = [];
         if (count($logs) === 0) {
@@ -203,36 +271,33 @@ class InterviewController extends Controller
         return "API Error ({$status}): Please try again.";
     }
 
-    private function callGeminiTTS(string $text): ?string
+    private function callGoogleTTS(string $text): ?string
     {
-        $apiKey = request()->header('X-Gemini-Api-Key') ?? env('GEMINI_API_KEY');
-        $url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key={$apiKey}";
+        $apiKey = request()->header('X-Google-TTS-Key') ?? env('GOOGLE_TTS_API_KEY');
+        if (!$apiKey) {
+            \Illuminate\Support\Facades\Log::warning('Google TTS API key not configured');
+            return null;
+        }
+
+        $url = "https://texttospeech.googleapis.com/v1/text:synthesize?key={$apiKey}";
 
         $payload = [
-            'contents' => [
-                ['parts' => [['text' => $text]]]
+            'input'       => ['text' => $text],
+            'voice'       => [
+                'languageCode' => 'en-US',
+                'name'         => 'en-US-Neural2-J', // Professional male interviewer voice
             ],
-            'generationConfig' => [
-                'responseModalities' => ['AUDIO'],
-                'speechConfig' => [
-                    'voiceConfig' => [
-                        'prebuiltVoiceConfig' => ['voiceName' => 'Aoede']
-                    ]
-                ]
-            ]
+            'audioConfig' => [
+                'audioEncoding' => 'MP3',
+                'speakingRate'  => 1.0,
+                'pitch'         => 0.0,
+            ],
         ];
 
-        // Try up to 2 times for transient errors (not for quota/auth errors)
-        $response = null;
-        for ($attempt = 1; $attempt <= 2; $attempt++) {
-            $response = Http::timeout(45)->post($url, $payload);
-            if ($response->successful()) break;
-            // Don't retry client errors (4xx) — quota exceeded, auth errors, etc.
-            if ($response->status() < 500) break;
-            if ($attempt < 2) sleep(1);
-        }
+        $response = Http::timeout(30)->post($url, $payload);
+
         if (!$response->successful()) {
-            \Illuminate\Support\Facades\Log::warning('Gemini TTS failed', [
+            \Illuminate\Support\Facades\Log::warning('Google TTS failed', [
                 'status' => $response->status(),
                 'body'   => substr($response->body(), 0, 500),
             ]);
@@ -240,38 +305,27 @@ class InterviewController extends Controller
         }
 
         $json = $response->json();
-        $rawBase64 = $json['candidates'][0]['content']['parts'][0]['inlineData']['data'] ?? null;
-        if (!$rawBase64) return null;
-
-        // PCM -> WAV conversion (24kHz, 16bit, mono)
-        $pcmData   = base64_decode($rawBase64);
-        $sampleRate = 24000; $numChannels = 1; $bitsPerSample = 16;
-        $dataSize = strlen($pcmData);
-        $byteRate = $sampleRate * $numChannels * ($bitsPerSample / 8);
-        $blockAlign = $numChannels * ($bitsPerSample / 8);
-        $wavHeader = pack('A4', 'RIFF') . pack('V', 36 + $dataSize) . pack('A4', 'WAVE')
-            . pack('A4', 'fmt ') . pack('V', 16) . pack('v', 1)
-            . pack('v', $numChannels) . pack('V', $sampleRate) . pack('V', $byteRate)
-            . pack('v', $blockAlign) . pack('v', $bitsPerSample)
-            . pack('A4', 'data') . pack('V', $dataSize);
-
-        return base64_encode($wavHeader . $pcmData);
+        return $json['audioContent'] ?? null; // Already base64-encoded MP3
     }
 
     public function tts(Request $request)
     {
         $request->validate(['text' => 'required|string|max:2000']);
 
-        $audioBase64 = $this->callGeminiTTS($request->text);
+        $audioBase64 = $this->callGoogleTTS($request->text);
 
         if (!$audioBase64) {
             return response()->json(['error' => 'TTS generation failed'], 500);
         }
 
-        ApiUsageLog::create(['type' => 'tts']);
+        ApiUsageLog::create([
+            'type'       => 'tts',
+            'char_count' => mb_strlen($request->text), // Track characters for Google TTS usage
+        ]);
 
         return response()->json([
             'audio_base64' => $audioBase64,
+            'mime_type'    => 'audio/mpeg', // MP3
         ]);
     }
 }
