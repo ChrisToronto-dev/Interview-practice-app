@@ -110,8 +110,8 @@ class InterviewController extends Controller
             'title' => 'Session ' . now()->format('Y-m-d H:i:s'),
         ]);
 
-        $reply = $this->callGemini([]);
-        ApiUsageLog::create(['type' => 'gemini']);
+        $reply = $this->callGroq([]);
+        ApiUsageLog::create(['type' => 'groq']);
 
         $session->logs()->create([
             'role' => 'assistant',
@@ -137,8 +137,8 @@ class InterviewController extends Controller
             'content' => $request->message
         ]);
 
-        $reply = $this->callGemini($session->logs()->get());
-        ApiUsageLog::create(['type' => 'gemini']);
+        $reply = $this->callGroq($session->logs()->get());
+        ApiUsageLog::create(['type' => 'groq']);
 
         $session->logs()->create([
             'role' => 'assistant',
@@ -155,8 +155,8 @@ class InterviewController extends Controller
         $session = InterviewSession::findOrFail($sessionId);
         $logs = $session->logs()->orderBy('id')->get();
 
-        $apiKey = request()->header('X-Gemini-Api-Key') ?? env('GEMINI_API_KEY');
-        $url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={$apiKey}";
+        $apiKey = request()->header('X-Groq-Api-Key') ?? env('GROQ_API_KEY');
+        $url = "https://api.groq.com/openai/v1/chat/completions";
 
         $systemInstruction = "You are an expert interview coach. Review the following mock interview transcript between an AI interviewer and an applicant. "
             . "Provide constructive, detailed feedback on the applicant's answers. Point out strengths and areas for improvement. "
@@ -169,36 +169,42 @@ class InterviewController extends Controller
         }
 
         $payload = [
-            'system_instruction' => [
-                'parts' => [['text' => $systemInstruction]]
-            ],
-            'contents' => [
+            'model' => 'llama-3.3-70b-versatile',
+            'messages' => [
+                [
+                    'role' => 'system',
+                    'content' => $systemInstruction
+                ],
                 [
                     'role' => 'user',
-                    'parts' => [['text' => "Here is the interview transcript:\n\n" . $transcript]]
+                    'content' => "Here is the interview transcript:\n\n" . $transcript
                 ]
             ],
-            'generationConfig' => [
-                'temperature' => 0.7,
-            ]
+            'temperature' => 0.7,
         ];
 
-        $response = Http::timeout(60)->post($url, $payload);
+        $response = Http::withToken($apiKey)->timeout(60)->post($url, $payload);
         
         if ($response->successful()) {
-            ApiUsageLog::create(['type' => 'gemini']);
+            ApiUsageLog::create(['type' => 'groq']);
             $json = $response->json();
-            $feedbackText = $json['candidates'][0]['content']['parts'][0]['text'] ?? "Failed to generate feedback.";
+            $feedbackText = $json['choices'][0]['message']['content'] ?? "Failed to generate feedback.";
             return response()->json(['feedback' => $feedbackText]);
         }
 
         return response()->json(['error' => 'Failed to fetch feedback from AI'], 500);
     }
 
-    private function callGemini($logs)
+    private function callGroq($logs)
     {
-        $apiKey = request()->header('X-Gemini-Api-Key') ?? env('GEMINI_API_KEY');
-        $url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={$apiKey}";
+        $apiKey = request()->header('X-Groq-Api-Key');
+        if (empty($apiKey)) {
+            $apiKey = env('GROQ_API_KEY');
+            \Illuminate\Support\Facades\Log::info("Header missing, using env key: " . substr($apiKey, 0, 10) . '...');
+        } else {
+            \Illuminate\Support\Facades\Log::info("Header present, using header key: " . substr($apiKey, 0, 10) . '...');
+        }
+        $url = "https://api.groq.com/openai/v1/chat/completions";
         
         $resume = InterviewContext::where('type', 'resume')->first()?->content ?? '';
         $qna = InterviewContext::where('type', 'qna')->first()?->content ?? '';
@@ -224,38 +230,37 @@ class InterviewController extends Controller
         }
         $systemInstruction .= "Resume:\n" . $resume . "\n\nQ&A Base:\n" . $qna;
 
-        $contents = [];
+        $messages = [];
+        $messages[] = [
+            'role' => 'system',
+            'content' => $systemInstruction
+        ];
+
         if (count($logs) === 0) {
-            $contents[] = [
+            $messages[] = [
                 'role' => 'user',
-                'parts' => [['text' => 'Hello, I am ready for the interview. Please start by asking my first question.']]
+                'content' => 'Hello, I am ready for the interview. Please start by asking my first question.'
             ];
         } else {
             foreach ($logs as $log) {
-                $contents[] = [
-                    'role' => $log->role === 'assistant' ? 'model' : 'user',
-                    'parts' => [['text' => $log->content]]
+                $messages[] = [
+                    'role' => $log->role === 'assistant' ? 'assistant' : 'user',
+                    'content' => $log->content
                 ];
             }
         }
 
         $payload = [
-            'system_instruction' => [
-                'parts' => [
-                    ['text' => $systemInstruction]
-                ]
-            ],
-            'contents' => $contents,
-            'generationConfig' => [
-                'maxOutputTokens' => 150,
-                'temperature' => 0.8,
-            ]
+            'model' => 'llama-3.3-70b-versatile',
+            'messages' => $messages,
+            'max_tokens' => 150,
+            'temperature' => 0.8,
         ];
 
         // Try up to 2 times for transient errors
         $response = null;
         for ($attempt = 1; $attempt <= 2; $attempt++) {
-            $response = Http::timeout(45)->post($url, $payload);
+            $response = Http::withToken($apiKey)->timeout(45)->post($url, $payload);
             if ($response->successful()) break;
             // Only retry on 5xx server errors (not 4xx client errors)
             if ($response->status() < 500) break;
@@ -264,14 +269,14 @@ class InterviewController extends Controller
 
         if ($response->successful()) {
             $json = $response->json();
-            return $json['candidates'][0]['content']['parts'][0]['text'] ?? "Failed to generate text.";
+            return $json['choices'][0]['message']['content'] ?? "Failed to generate text.";
         }
 
         $status = $response->status();
         return "API Error ({$status}): Please try again.";
     }
 
-    private function callGoogleTTS(string $text): ?string
+    private function callGoogleTTS(string $text): ?array
     {
         $apiKey = request()->header('X-Google-TTS-Key') ?? env('GOOGLE_TTS_API_KEY');
         if (!$apiKey) {
@@ -305,17 +310,22 @@ class InterviewController extends Controller
         }
 
         $json = $response->json();
-        return $json['audioContent'] ?? null; // Already base64-encoded MP3
-    }
+        $audioContent = $json['audioContent'] ?? null;
+        if (!$audioContent) return null;
 
+        return [
+            'base64' => $audioContent,
+            'mime_type' => 'audio/mpeg'
+        ];
+    }
     public function tts(Request $request)
     {
         $request->validate(['text' => 'required|string|max:2000']);
 
-        $audioBase64 = $this->callGoogleTTS($request->text);
+        $audioData = $this->callGoogleTTS($request->text);
 
-        if (!$audioBase64) {
-            return response()->json(['error' => 'TTS generation failed'], 500);
+        if (!$audioData) {
+            return response()->json(['error' => 'TTS generation failed on Google Cloud. Please configure Google TTS API keys.'], 500);
         }
 
         ApiUsageLog::create([
@@ -324,8 +334,8 @@ class InterviewController extends Controller
         ]);
 
         return response()->json([
-            'audio_base64' => $audioBase64,
-            'mime_type'    => 'audio/mpeg', // MP3
+            'audio_base64' => $audioData['base64'],
+            'mime_type'    => $audioData['mime_type'],
         ]);
     }
 }

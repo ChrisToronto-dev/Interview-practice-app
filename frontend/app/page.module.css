@@ -1,0 +1,337 @@
+.container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 2rem;
+  width: 100%;
+}
+
+.authBox {
+  composes: glass-panel from global;
+  padding: 3rem;
+  width: 100%;
+  max-width: 400px;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  animation: fadeIn 0.5s ease-out;
+}
+
+.setupBox {
+  composes: glass-panel from global;
+  padding: 2rem;
+  width: 100%;
+  max-width: 800px;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  animation: fadeIn 0.5s ease-out;
+}
+
+.interviewBox {
+  composes: glass-panel from global;
+  padding: 2rem;
+  width: 100%;
+  max-width: 800px;
+  height: 80vh;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  animation: fadeIn 0.5s ease-out;
+}
+
+.header {
+  font-size: 1.8rem;
+  font-weight: 600;
+  text-align: center;
+  margin-bottom: 0.5rem;
+  background: var(--accent-gradient);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.subtitle {
+  color: var(--text-muted);
+  text-align: center;
+  font-size: 0.9rem;
+}
+
+.inputGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.inputGroup label {
+  font-size: 0.9rem;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.inputGroup input,
+.inputGroup textarea {
+  width: 100%;
+}
+
+.inputGroup textarea {
+  min-height: 150px;
+  resize: vertical;
+}
+
+.btnPrimary {
+  background: var(--accent-gradient);
+  color: white;
+  padding: 12px 24px;
+  border-radius: 8px;
+  font-weight: 600;
+  font-size: 1rem;
+  box-shadow: 0 4px 15px rgba(139, 92, 246, 0.4);
+}
+
+.btnPrimary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(139, 92, 246, 0.6);
+}
+
+.btnSecondary {
+  background: var(--surface-lighter);
+  color: white;
+  padding: 10px 20px;
+  border-radius: 8px;
+  font-weight: 500;
+  border: 1px solid var(--border-color);
+}
+
+.btnSecondary:hover {
+  background: var(--surface-dark);
+}
+
+/* Interview UI */
+.chatArea {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding: 1rem 0;
+}
+
+.message {
+  padding: 1rem 1.5rem;
+  border-radius: 12px;
+  max-width: 80%;
+  line-height: 1.6;
+}
+
+.messageAssistant {
+  background: var(--surface-lighter);
+  align-self: flex-start;
+  border-bottom-left-radius: 4px;
+}
+
+.messageUser {
+  background: rgba(59, 130, 246, 0.2);
+  border: 1px solid rgba(59, 130, 246, 0.4);
+  align-self: flex-end;
+  border-bottom-right-radius: 4px;
+}
+
+.controls {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 1rem;
+  gap: 1rem;
+  border-top: 1px solid var(--border-color);
+}
+
+.micBtn {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: var(--surface-lighter);
+  border: 2px solid var(--border-color);
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.3s ease;
+}
+
+.micBtn.recording {
+  background: rgba(239, 68, 68, 0.2);
+  border-color: var(--error-color);
+  color: var(--error-color);
+  animation: pulse-ring 2s infinite;
+}
+
+.micBtn:hover:not(.recording) {
+  border-color: var(--accent-primary);
+  color: var(--accent-primary);
+}
+
+.transcriptPreview {
+  width: 100%;
+  padding: 1rem;
+  background: var(--surface-dark);
+  border-radius: 8px;
+  font-size: 0.9rem;
+  color: var(--text-muted);
+  min-height: 48px;
+}
+
+.listeningText {
+  color: var(--accent-primary);
+  font-size: 0.8rem;
+  text-align: center;
+  animation: fadeIn 0.5s infinite alternate;
+}
+
+/* API Usage Badge */
+.usageBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 20px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  border: 1px solid transparent;
+  white-space: nowrap;
+  transition: all 0.3s ease;
+}
+
+.usageBadgeGood {
+  background: rgba(34, 197, 94, 0.12);
+  border-color: rgba(34, 197, 94, 0.35);
+  color: #4ade80;
+}
+
+.usageBadgeWarn {
+  background: rgba(234, 179, 8, 0.12);
+  border-color: rgba(234, 179, 8, 0.35);
+  color: #facc15;
+}
+
+.usageBadgeCritical {
+  background: rgba(239, 68, 68, 0.12);
+  border-color: rgba(239, 68, 68, 0.35);
+  color: #f87171;
+  animation: pulse-ring 1.5s infinite;
+}
+
+.usageBadgeDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  display: inline-block;
+  background: currentColor;
+}
+
+/* API Key Status Widget */
+.apiKeyStatusWidget {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  background: var(--surface-lighter);
+  border: 1px solid var(--border-color);
+  border-radius: 20px;
+  padding: 0.4rem 0.8rem;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  cursor: pointer;
+  z-index: 50;
+  transition: all 0.2s ease;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.apiKeyStatusWidget:hover {
+  background: var(--surface-dark);
+  border-color: var(--accent-primary);
+}
+
+.statusItem {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.statusDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.statusDot.valid {
+  background-color: #4ade80;
+  box-shadow: 0 0 5px rgba(74, 222, 128, 0.4);
+}
+
+.statusDot.invalid {
+  background-color: #f87171;
+  box-shadow: 0 0 5px rgba(248, 113, 113, 0.4);
+}
+
+/* Modal Overlay */
+.modalOverlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(4px);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 100;
+  animation: fadeIn 0.2s ease-out;
+}
+
+.modalContent {
+  composes: glass-panel from global;
+  padding: 2rem;
+  width: 100%;
+  max-width: 450px;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  animation: slideUp 0.3s ease-out;
+}
+.summaryBox {
+  composes: glass-panel from global;
+  padding: 2rem;
+  width: 100%;
+  max-width: 800px;
+  height: 85vh;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  animation: fadeIn 0.5s ease-out;
+}
+
+.summaryControls {
+  display: flex;
+  gap: 1rem;
+  justify-content: center;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.feedbackArea {
+  flex: 1;
+  overflow-y: auto;
+  padding: 1rem;
+  background: var(--surface-dark);
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  font-size: 0.95rem;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  color: var(--text-primary);
+}

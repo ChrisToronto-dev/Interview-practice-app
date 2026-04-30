@@ -11,19 +11,19 @@ class AuthController extends Controller
         $apiKey = $request->input('api_key');
         $ttsKey = $request->input('tts_key');
 
-        // Gemini API keys typically start with 'AIza'
-        $geminiValid = $apiKey && str_starts_with($apiKey, 'AIza');
+        // Groq API keys typically start with 'gsk_'
+        $groqValid = $apiKey && str_starts_with($apiKey, 'gsk_');
         $ttsValid = $ttsKey ? str_starts_with($ttsKey, 'AIza') : false;
 
-        if ($geminiValid) {
+        if ($groqValid) {
             return response()->json([
                 'success' => true,
-                'gemini_valid' => true,
+                'groq_valid' => true,
                 'tts_valid' => $ttsValid,
                 'tts_provided' => !empty($ttsKey)
             ]);
         }
 
-        return response()->json(['success' => false, 'message' => 'Invalid Gemini API Key format'], 401);
+        return response()->json(['success' => false, 'message' => 'Invalid Groq API Key format'], 401);
     }
 }

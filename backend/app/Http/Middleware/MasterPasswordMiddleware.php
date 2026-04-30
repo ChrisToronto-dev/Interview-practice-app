@@ -15,10 +15,10 @@ class MasterPasswordMiddleware
      */
     public function handle(Request $request, Closure $next): Response
     {
-        $apiKey = $request->header('X-Gemini-Api-Key');
+        $apiKey = $request->header('X-Groq-Api-Key');
 
-        if (!$apiKey || !str_starts_with($apiKey, 'AIza')) {
-            return response()->json(['message' => 'Unauthorized: Invalid or missing Gemini API Key'], 401);
+        if (!$apiKey || !str_starts_with($apiKey, 'gsk_')) {
+            return response()->json(['message' => 'Unauthorized: Invalid or missing Groq API Key'], 401);
         }
 
         return $next($request);
